@@ -2,7 +2,7 @@ use anchor_lang::{prelude::*, solana_program::program::invoke_signed};
 use mpl_token_metadata::{state::DataV2, ID};
 use std::ops::Deref;
 
-pub fn create_metadata_accounts_v2<'info>(
+pub fn create_metadata_accounts_v3<'info>(
     ctx: CpiContext<'_, '_, '_, 'info, CreateMetadataAccountsV2<'info>>,
     data: DataV2,
     is_mutable: bool,
@@ -17,7 +17,7 @@ pub fn create_metadata_accounts_v2<'info>(
         collection,
         uses,
     } = data;
-    let ix = mpl_token_metadata::instruction::create_metadata_accounts_v2(
+    let ix = mpl_token_metadata::instruction::create_metadata_accounts_v3(
         ID,
         *ctx.accounts.metadata.key,
         *ctx.accounts.mint.key,
@@ -33,6 +33,7 @@ pub fn create_metadata_accounts_v2<'info>(
         is_mutable,
         collection,
         uses,
+        None,
     );
     invoke_signed(&ix, &ToAccountInfos::to_account_infos(&ctx), ctx.signer_seeds).map_err(Into::into)
 }
@@ -75,6 +76,7 @@ pub fn create_master_edition_v3<'info>(
 
 pub fn mint_new_edition_from_master_edition_via_token<'info>(
     ctx: CpiContext<'_, '_, '_, 'info, MintNewEditionFromMasterEditionViaToken<'info>>,
+    metadata_mint: Pubkey,
     edition: u64,
 ) -> Result<()> {
     let ix = mpl_token_metadata::instruction::mint_new_edition_from_master_edition_via_token(
@@ -89,7 +91,7 @@ pub fn mint_new_edition_from_master_edition_via_token<'info>(
         *ctx.accounts.token_account.key,
         *ctx.accounts.new_metadata_update_authority.key,
         *ctx.accounts.metadata.key,
-        *ctx.accounts.metadata_mint.key,
+        metadata_mint,
         edition,
     );
     invoke_signed(&ix, &ToAccountInfos::to_account_infos(&ctx), ctx.signer_seeds).map_err(Into::into)
@@ -189,14 +191,6 @@ pub struct MintNewEditionFromMasterEditionViaToken<'info> {
     pub token_program: AccountInfo<'info>,
     pub system_program: AccountInfo<'info>,
     pub rent: AccountInfo<'info>,
-    //
-    // Not actually used by the program but still needed because it's needed
-    // for the pda calculation in the helper. :/
-    //
-    // The better thing to do would be to remove this and have the instruction
-    // helper pass in the `edition_mark_pda` directly.
-    //
-    pub metadata_mint: AccountInfo<'info>,
 }
 
 #[derive(Accounts)]
@@ -252,6 +246,36 @@ impl anchor_lang::Owner for MetadataAccount {
 
 impl Deref for MetadataAccount {
     type Target = mpl_token_metadata::state::Metadata;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MasterEditionAccount(mpl_token_metadata::state::MasterEditionV2);
+
+impl anchor_lang::AccountDeserialize for MasterEditionAccount {
+    fn try_deserialize_unchecked(buf: &mut &[u8]) -> anchor_lang::Result<Self> {
+        mpl_token_metadata::utils::try_from_slice_checked(
+            buf,
+            mpl_token_metadata::state::Key::MasterEditionV2,
+            mpl_token_metadata::state::MAX_MASTER_EDITION_LEN,
+        )
+        .map(MasterEditionAccount)
+        .map_err(Into::into)
+    }
+}
+
+impl anchor_lang::AccountSerialize for MasterEditionAccount {}
+
+impl anchor_lang::Owner for MasterEditionAccount {
+    fn owner() -> Pubkey {
+        ID
+    }
+}
+
+impl Deref for MasterEditionAccount {
+    type Target = mpl_token_metadata::state::MasterEditionV2;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
